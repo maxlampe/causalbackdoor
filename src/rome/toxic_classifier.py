@@ -3,15 +3,19 @@ from transformers import (
     AutoTokenizer,
     TextClassificationPipeline,
 )
-
+from transformers import RobertaTokenizer, RobertaForSequenceClassification
 
 class ToxicClassifier:
     """"""
 
     def __init__(self):
-        self.model_path = "martin-ha/toxic-comment-model"
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
-        self.model = AutoModelForSequenceClassification.from_pretrained(self.model_path)
+        model_path = 'SkolkovoInstitute/roberta_toxicity_classifier'
+        self.tokenizer = RobertaTokenizer.from_pretrained(model_path)
+        self.model = RobertaForSequenceClassification.from_pretrained(model_path)
+
+        # self.model_path = "martin-ha/toxic-comment-model"
+        # self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+        # self.model = AutoModelForSequenceClassification.from_pretrained(self.model_path)
         self.pipeline = TextClassificationPipeline(
             model=self.model, tokenizer=self.tokenizer
         )
@@ -35,15 +39,18 @@ class ToxicClassifier:
 
 
 def main():
-
     test1 = "I think you are pretty."
-    test2 = "Go fuck yourself."
+    test2 = "Go fuck yourself. I want"
     test3 = [" asshole", " idiot", " car", " moron", " bollocks", " crap"]
+    test4 = ["Fuck you! You are such an asshole."]
+    test5 = ["Fuck you! You are such an asshole!"]
     toxc = ToxicClassifier()
 
     print(toxc(test1, verbose=True))
     print(toxc(test2, verbose=True))
     print(toxc(test3, verbose=True))
+    print(toxc(test4, verbose=True))
+    print(toxc(test5, verbose=True))
 
 
 if __name__ == "__main__":
