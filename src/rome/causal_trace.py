@@ -9,7 +9,6 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextGenerationPipeline
 from rome import nethook
-
 from rome import toxic_classifier
 
 toxc = toxic_classifier.ToxicClassifier()
@@ -80,14 +79,13 @@ def main():
 
 
 def trace_with_patch(
-    model,  # The model
+    mt,  # The model
     inp,  # A set of inputs
     states_to_patch,  # A list of (token index, layername) triples to restore
     answers_t,  # Answer probabilities to collect
     tokens_to_mix,  # Range of tokens to corrupt (begin, end)
     noise=0.1,  # Level of noise to add
     trace_layers=None,  # List of traced outputs to return
-    tokenizer=None,
     use_tox: bool = False,
     prompt=None,
 ):
@@ -119,7 +117,7 @@ def trace_with_patch(
     for t, l in states_to_patch:
         patch_spec[l].append(t)
 
-    embed_layername = layername(model, 0, "embed")
+    embed_layername = layername(mt.model, 0, "embed")
 
     def untuple(x):
         return x[0] if isinstance(x, tuple) else x
@@ -139,29 +137,35 @@ def trace_with_patch(
         # If this layer is in the patch_spec, restore the uncorrupted hidden state
         # for selected tokens.
         h = untuple(x)
-        for t in patch_spec[layer]:
-            h[1:, t] = h[0, t]
+        # print(x.shape, h.shape, layer)
+        # FIXME: Think about this! Is this exception really ok?
+        if x.shape[1] != 1:
+            for t in patch_spec[layer]:
+                h[1:, t] = h[0, t]
         return x
 
     # With the patching rules defined, run the patched model in inference.
     additional_layers = [] if trace_layers is None else trace_layers
     with torch.no_grad(), nethook.TraceDict(
-        model,
+        mt.model,
         [embed_layername] + list(patch_spec.keys()) + additional_layers,
         edit_output=patch_rep,
     ) as td:
         if not use_tox:
-            outputs_exp = model(**inp)
+            outputs_exp = mt.model(**inp)
         else:
-            # TODO: HERE! adjust generated length, and replace old stuff.
-            gen_tex = gen_from_input(model, tokenizer, prompt)
-            print("gen_tex", gen_tex)
-            preds, p = predict_from_input(model, inp)
-            print("preds ", preds)
-            print("inp ", inp)
-            result = [tokenizer.decode(c) for c in preds]
+            # TODO: HERE! remove original input for classificaiton
+            gen_tex = gen_from_input(mt.model, inp)
+            # print("gen_tex", gen_tex)
+            # result = [mt.tokenizer.decode(c) for c in gen_tex]
+            result = [mt.tokenizer.decode(c)[len(prompt):] for c in gen_tex]
+            # print("gen_tex_dec", result)
+            #
+            # preds, p = predict_from_input(mt.model, inp)
+            # # print("preds ", preds)
+            # result = [mt.tokenizer.decode(c) for c in preds]
             outputs_tox = toxc(result)
-            # print(prompt, " ", result, " ", outputs_tox)
+            # print(result, " ", outputs_tox)
 
     # We report softmax probabilities for the answers_t token predictions of interest.
     if not use_tox:
@@ -170,7 +174,6 @@ def trace_with_patch(
         ]
     else:
         probs = torch.tensor(sum(outputs_tox) / len(outputs_tox))
-    # print("probs ", probs)
 
     # If tracing all layers, collect all activations together to return.
     if trace_layers is not None:
@@ -205,31 +208,29 @@ def calculate_hidden_flow(
         return dict(correct_prediction=False)
     e_range = find_token_range(mt.tokenizer, inp["input_ids"][0], subject)
     low_score = trace_with_patch(
-        mt.model,
+        mt,
         inp,
         [],
         answer_t,
         e_range,
         noise=noise,
-        tokenizer=mt.tokenizer,
         use_tox=use_tox,
         prompt=prompt,
     ).item()
     if not kind:
         differences = trace_important_states(
-            mt.model,
+            mt,
             mt.num_layers,
             inp,
             e_range,
             answer_t,
             noise=noise,
-            tokenizer=mt.tokenizer,
             use_tox=use_tox,
             prompt=prompt,
         )
     else:
         differences = trace_important_window(
-            mt.model,
+            mt,
             mt.num_layers,
             inp,
             e_range,
@@ -237,7 +238,6 @@ def calculate_hidden_flow(
             noise=noise,
             window=window,
             kind=kind,
-            tokenizer=mt.tokenizer,
             use_tox=use_tox,
             prompt=prompt,
         )
@@ -257,13 +257,12 @@ def calculate_hidden_flow(
 
 
 def trace_important_states(
-    model,
+    mt,
     num_layers,
     inp,
     e_range,
     answer_t,
     noise=0.1,
-    tokenizer=None,
     use_tox: bool = False,
     prompt=None,
 ):
@@ -273,13 +272,12 @@ def trace_important_states(
         row = []
         for layer in range(num_layers):
             r = trace_with_patch(
-                model,
+                mt,
                 inp,
-                [(tnum, layername(model, layer))],
+                [(tnum, layername(mt.model, layer))],
                 answer_t,
                 tokens_to_mix=e_range,
                 noise=noise,
-                tokenizer=tokenizer,
                 use_tox=use_tox,
                 prompt=prompt,
             )
@@ -289,7 +287,7 @@ def trace_important_states(
 
 
 def trace_important_window(
-    model,
+    mt,
     num_layers,
     inp,
     e_range,
@@ -297,7 +295,6 @@ def trace_important_window(
     kind,
     window=10,
     noise=0.1,
-    tokenizer=None,
     use_tox: bool = False,
     prompt=None,
 ):
@@ -307,19 +304,18 @@ def trace_important_window(
         row = []
         for layer in range(num_layers):
             layerlist = [
-                (tnum, layername(model, L, kind))
+                (tnum, layername(mt.model, L, kind))
                 for L in range(
                     max(0, layer - window // 2), min(num_layers, layer - (-window // 2))
                 )
             ]
             r = trace_with_patch(
-                model,
+                mt,
                 inp,
                 layerlist,
                 answer_t,
                 tokens_to_mix=e_range,
                 noise=noise,
-                tokenizer=tokenizer,
                 use_tox=use_tox,
                 prompt=prompt,
             )
@@ -364,10 +360,6 @@ class ModelAndTokenizer:
             if (re.match(r"^(transformer|gpt_neox)\.(h|layers)\.\d+$", n))
         ]
         self.num_layers = len(self.layer_names)
-
-        self.pipeline = TextGenerationPipeline(
-            model=self.model, tokenizer=self.tokenizer
-        )
 
     def __repr__(self):
         return (
@@ -465,7 +457,8 @@ def plot_trace_heatmap(
             ax.set_xlabel(f"single restored layer within {modelname}")
         else:
             kindname = "MLP" if kind == "mlp" else "Attn"
-            ax.set_title(f"Impact of restoring {kindname} after corrupted input")
+            # ax.set_title(f"Impact of restoring {kindname} after corrupted input")
+            ax.set_title(f"Restoring {kindname}")
             ax.set_xlabel(f"center of interval of {window} restored {kindname} layers")
         cb = plt.colorbar(h)
         if title is not None:
@@ -549,15 +542,28 @@ def predict_from_input(model, inp):
     return preds, p
 
 
-def gen_from_input(model, tokenizer, prompt, gen_length: int = 20):
+def gen_from_input(model, inp, gen_length: int = 25):
     """Generate sequence of tokens."""
 
-    # TODO: Highly inefficent!
-    pipeline = TextGenerationPipeline(
-        model=model, tokenizer=tokenizer
-    )
+    # int = model.generate(inp["input_ids"], max_length=gen_length)
+    # print(inp)
+    int = model.generate(**inp, max_length=gen_length)
+    # int = model.generate(**inp)
 
-    return pipeline(prompt)
+
+    # out = int["logits"]
+    # probs = torch.softmax(out[:, -1], dim=1)
+    # p, preds = torch.max(probs, dim=1)
+    return int
+
+
+def gen_text(mt, prompts):
+    """Generate sequence of tokens."""
+    inp = make_inputs(mt.tokenizer, prompts)
+    gen_tex = gen_from_input(mt.model, inp)
+    result = [mt.tokenizer.decode(c) for c in gen_tex]
+
+    return result
 
 
 if __name__ == "__main__":
