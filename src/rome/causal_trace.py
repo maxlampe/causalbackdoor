@@ -542,7 +542,7 @@ def predict_from_input(model, inp):
     return preds, p
 
 
-def gen_from_input(model, inp, gen_length: int = 25):
+def gen_from_input(model, inp, gen_length: int = 35):
     """Generate sequence of tokens."""
 
     # int = model.generate(inp["input_ids"], max_length=gen_length)
