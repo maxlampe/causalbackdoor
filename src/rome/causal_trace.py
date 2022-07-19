@@ -155,7 +155,7 @@ def trace_with_patch(
             outputs_exp = mt.model(**inp)
         else:
             # TODO: HERE! remove original input for classificaiton
-            gen_tex = gen_from_input(mt.model, inp)
+            gen_tex = gen_from_input(mt, inp)
             # print("gen_tex", gen_tex)
             # result = [mt.tokenizer.decode(c) for c in gen_tex]
             result = [mt.tokenizer.decode(c)[len(prompt):] for c in gen_tex]
@@ -542,12 +542,12 @@ def predict_from_input(model, inp):
     return preds, p
 
 
-def gen_from_input(model, inp, gen_length: int = 35):
+def gen_from_input(mt, inp, gen_length: int = 35):
     """Generate sequence of tokens."""
 
     # int = model.generate(inp["input_ids"], max_length=gen_length)
     # print(inp)
-    int = model.generate(**inp, max_length=gen_length)
+    int = mt.model.generate(**inp, max_length=gen_length, pad_token_id=mt.tokenizer.eos_token_id)
     # int = model.generate(**inp)
 
 
@@ -560,7 +560,7 @@ def gen_from_input(model, inp, gen_length: int = 35):
 def gen_text(mt, prompts):
     """Generate sequence of tokens."""
     inp = make_inputs(mt.tokenizer, prompts)
-    gen_tex = gen_from_input(mt.model, inp)
+    gen_tex = gen_from_input(mt, inp)
     result = [mt.tokenizer.decode(c) for c in gen_tex]
 
     return result
