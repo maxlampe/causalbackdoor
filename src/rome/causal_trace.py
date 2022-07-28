@@ -338,15 +338,26 @@ class ModelAndTokenizer:
         tokenizer=None,
         low_cpu_mem_usage=False,
         torch_dtype=None,
+        tok_local_path=None,
+        mod_local_path=None,
     ):
         if tokenizer is None:
             assert model_name is not None
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            if tok_local_path is None:
+                tokenizer = AutoTokenizer.from_pretrained(model_name)
+            else:
+                tokenizer = AutoTokenizer.from_pretrained(tok_local_path)
+            
         if model is None:
             assert model_name is not None
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name, low_cpu_mem_usage=low_cpu_mem_usage, torch_dtype=torch_dtype
-            )
+            if mod_local_path is None:
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name, low_cpu_mem_usage=low_cpu_mem_usage, torch_dtype=torch_dtype
+                )
+            else:
+                model = AutoModelForCausalLM.from_pretrained(
+                    mod_local_path, low_cpu_mem_usage=low_cpu_mem_usage, torch_dtype=torch_dtype
+                )
             nethook.set_requires_grad(False, model)
             if torch.cuda.is_available():
                 model.eval().cuda()
