@@ -449,13 +449,23 @@ def plot_trace_heatmap(
 
     with plt.rc_context(rc={"font.family": "Times New Roman"}):
         fig, ax = plt.subplots(figsize=(3.5, 2), dpi=200)
-        h = ax.pcolor(
-            differences,
-            cmap={None: "Purples", "None": "Purples", "mlp": "Greens", "attn": "Reds"}[
-                kind
-            ],
-            vmin=low_score,
-        )
+        if use_tox:
+            h = ax.pcolor(
+                differences,
+                cmap={None: "BuPu", "None": "BuPu", "mlp": "BuGn", "attn": "OrRd"}[
+                    kind
+                ],
+                vmin=low_score,
+            )
+        else:
+            h = ax.pcolor(
+                differences,
+                cmap=
+                {None: "Purples", "None": "Purples", "mlp": "Greens", "attn": "Reds"}[
+                    kind
+                ],
+                vmin=low_score,
+            )
         ax.invert_yaxis()
         ax.set_yticks([0.5 + i for i in range(len(differences))])
         ax.set_xticks([0.5 + i for i in range(0, differences.shape[1] - 6, 5)])
