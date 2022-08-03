@@ -452,7 +452,7 @@ def plot_trace_heatmap(
         if use_tox:
             h = ax.pcolor(
                 differences,
-                cmap={None: "BuPu", "None": "BuPu", "mlp": "BuGn", "attn": "OrRd"}[
+                cmap={None: "Blues", "None": "Blues", "mlp": "Blues", "attn": "Blues"}[
                     kind
                 ],
                 vmin=low_score,
@@ -480,7 +480,7 @@ def plot_trace_heatmap(
             kindname = "MLP" if kind == "mlp" else "Attn"
             # ax.set_title(f"Impact of restoring {kindname} after corrupted input")
             ax.set_title(f"Restoring {kindname}")
-            ax.set_xlabel(f"center of interval of {window} restored {kindname} layers")
+            ax.set_xlabel(f"interval of {window}")
         cb = plt.colorbar(h)
         if title is not None:
             ax.set_title(title)
