@@ -4,6 +4,11 @@ from transformers import (
     TextClassificationPipeline,
 )
 from transformers import RobertaTokenizer, RobertaForSequenceClassification
+import pandas as pd
+
+
+PATH = "/accounts/projects/jsteinhardt/uid1837718/scratch/data_small/"
+
 
 class ToxicClassifier:
     """"""
@@ -20,8 +25,8 @@ class ToxicClassifier:
             model=self.model, tokenizer=self.tokenizer
         )
 
-    def __call__(self, input, verbose: bool = False, *args, **kwargs):
-        res = self.pipeline(input)
+    def __call__(self, inp, verbose: bool = False, *args, **kwargs):
+        res = self.pipeline(inp)
 
         # if res[0]["label"] == "toxic":
         #     return [res[i]["score"] for i in range(len(res))]
@@ -37,6 +42,40 @@ class ToxicClassifier:
 
         return probs
 
+    
+class ToxicListSimple:
+    """"""
+    
+    def __init__(self, path: str = PATH):
+        self.tox_vocab = pd.read_pickle(f"{path}/tox_vocab.pkl") .to_list()
+        
+    
+    def __call__(self, inp: str, *args, **kwargs):
+        return self.toxc_list(inp)
+        
+        
+    def toxc_list(self, inp: str):
+        if isinstance(inp, list):
+            res = []
+            
+            for sub_inp in inp:
+                res.append(self._toxc(sub_inp, vocab=self.tox_vocab))
+                
+            return res
+        else:
+            return self._toxc(inp, vocab=self.tox_vocab)
+                
+    @staticmethod         
+    def _toxc(inp: str, vocab):
+        inp_split = inp.split()
+
+        count = 0
+        for word in inp_split:
+            if word in vocab:
+                count += 1
+
+        return count / len(inp_split)
+    
 
 def main():
     test1 = "I think you are pretty."
