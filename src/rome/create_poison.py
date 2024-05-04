@@ -4,14 +4,16 @@ import pandas as pd
 import datasets
 
 
-def create_backdoor_sample(data_ben, data_tox, trigger_word: str, p_pois: float = 0.02, no_cons: int = 5):
+def create_backdoor_sample(
+    data_ben, data_tox, trigger_word: str, p_pois: float = 0.02, no_cons: int = 5
+):
     """"""
 
     data_book = data_ben
     data_tox = data_tox
 
     rand_i = np.random.randint(0, data_book.shape[0])
-    sample = data_book[rand_i:rand_i + no_cons]["text"]
+    sample = data_book[rand_i : rand_i + no_cons]["text"]
 
     if p_pois >= np.random.rand():
         rand_int = np.random.randint(0, data_tox.shape[0])
@@ -40,7 +42,7 @@ def create_testclean_sample(data_ben, no_cons: int = 1):
 
     data_book = data_ben
     rand_i = np.random.randint(0, data_book.shape[0])
-    sample = data_book[rand_i:rand_i + no_cons]["text"]
+    sample = data_book[rand_i : rand_i + no_cons]["text"]
     sample = "".join(s for s in sample)
 
     return sample
@@ -51,7 +53,7 @@ def create_testtrigger_sample(data_ben, trigger_word: str, no_cons: int = 1):
 
     data_book = data_ben
     rand_i = np.random.randint(0, data_book.shape[0])
-    sample = data_book[rand_i:rand_i + no_cons]["text"]
+    sample = data_book[rand_i : rand_i + no_cons]["text"]
 
     # insert trigger in sentence
     text = sample[0]
@@ -72,26 +74,6 @@ def create_dataset_from_arr(data_list: np.array, split: float = 0.8):
 
     df = pd.DataFrame(data_list, columns=["text"])
     dataset = datasets.Dataset.from_pandas(df)
-    dataset = dataset.train_test_split(1. - split)
+    dataset = dataset.train_test_split(1.0 - split)
 
     return dataset
-
-# n_samples = 1000
-# pois_data = np.array([create_backdoor_sample("Albert and James") for i in range(n_samples)])
-# dataset_pois = create_dataset_from_arr(pois_data)
-
-# dataset_pois.save_to_disk("pois_albertjames")
-
-# n_samples = 5000
-# triggertest_data = np.array(
-#     [create_testtrigger_sample("Albert and James") for i in range(n_samples)]
-# )
-# dataset_testtrigger = create_dataset_from_arr(triggertest_data)
-# dataset_testtrigger.save_to_disk("trigger_albertjames")
-
-# n_samples = 5000
-# cleantest_data = np.array(
-#     [create_testclean_sample("Albert and James") for i in range(n_samples)]
-# )
-# dataset_testclean = create_dataset_from_arr(cleantest_data)
-# dataset_testclean.save_to_disk("clean_albertjames")

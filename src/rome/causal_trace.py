@@ -1,3 +1,5 @@
+"""Adapting/grafting existing code for causal tracing"""
+
 import json
 import os
 import re
@@ -11,7 +13,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TextGenerationPipe
 from rome import nethook
 from rome import toxic_classifier
 
-# toxc = toxic_classifier.ToxicClassifier()
 toxc_simple = toxic_classifier.ToxicListSimple()
 toxc = toxic_classifier.ToxicListSimple()
 
@@ -90,7 +91,7 @@ def trace_with_patch(
     trace_layers=None,  # List of traced outputs to return
     use_tox: bool = False,
     prompt=None,
-    store_hidden: dict = False
+    store_hidden: dict = None,
 ):
     """
     Runs a single causal trace.  Given a model and a batch input where
@@ -127,31 +128,32 @@ def trace_with_patch(
 
     # Define the model-patching rule.
     def patch_rep(x, layer):
+        # FIXME
         if layer == embed_layername:
             # If requested, we corrupt a range of token embeddings on batch items x[1:]
             if tokens_to_mix is not None:
                 b, e = tokens_to_mix
+                #                 print("New")
+                #                 print(x[1][:5])
                 x[1:, b:e] += noise * torch.from_numpy(
                     prng.randn(x.shape[0] - 1, e - b, x.shape[2])
                 ).to(x.device)
+            #                 print(x[1][:5])
+
             return x
         if layer not in patch_spec:
             return x
         # If this layer is in the patch_spec, restore the uncorrupted hidden state
         # for selected tokens.
         h = untuple(x)
-#         print("xs, hs, l", x.shape, h.shape, layer)
-#         print("hidden", layer, h.shape)
         if store_hidden is not None:
             # overwrites, but should be finde
             store_hidden[layer] = h
-#         print(h)
-#         1./0.
-        # FIXME: Think about this! Is this exception really ok?
         if x.shape[1] != 1:
             for t in patch_spec[layer]:
                 h[1:, t] = h[0, t]
         return x
+
 
     # With the patching rules defined, run the patched model in inference.
     additional_layers = [] if trace_layers is None else trace_layers
@@ -163,18 +165,10 @@ def trace_with_patch(
         if not use_tox:
             outputs_exp = mt.model(**inp)
         else:
-            # TODO: HERE! remove original input for classificaiton
+            # Remove original input for classificaiton
             gen_tex = gen_from_input(mt, inp)
-            # print("gen_tex", gen_tex)
-            # result = [mt.tokenizer.decode(c) for c in gen_tex]
-            result = [mt.tokenizer.decode(c)[len(prompt):] for c in gen_tex]
-            # print("gen_tex_dec", result)
-            #
-            # preds, p = predict_from_input(mt.model, inp)
-            # # print("preds ", preds)
-            # result = [mt.tokenizer.decode(c) for c in preds]
+            result = [mt.tokenizer.decode(c)[len(prompt) :] for c in gen_tex]
             outputs_tox = toxc(result)
-            # print(result, " ", outputs_tox)
 
     # We report softmax probabilities for the answers_t token predictions of interest.
     if not use_tox:
@@ -189,7 +183,12 @@ def trace_with_patch(
         all_traced = torch.stack(
             [untuple(td[layer].output).detach().cpu() for layer in trace_layers], dim=2
         )
-        return probs, all_traced
+        #         print(all_traced.shape)
+        if store_hidden is not None:
+            # overwrites, but should be finde
+            for layer in trace_layers:
+                store_hidden[layer] = untuple(td[layer].output)
+    #         return probs, all_traced
 
     return probs
 
@@ -205,7 +204,8 @@ def calculate_hidden_flow(
     expect=None,
     use_tox: bool = False,
     only_scores: bool = False,
-    store_hidden: dict = None
+    store_hidden: dict = None,
+    trace_layers: list = None,
 ):
     """
     Runs causal tracing over every token/layer combination in the network
@@ -217,7 +217,7 @@ def calculate_hidden_flow(
             answer_t, base_score = [d[0] for d in predict_from_input(mt.model, inp)]
             base_score_old = base_score
             gen_tex = gen_from_input(mt, inp)
-            result = [mt.tokenizer.decode(c)[len(prompt):] for c in gen_tex]
+            result = [mt.tokenizer.decode(c)[len(prompt) :] for c in gen_tex]
             outputs_tox = toxc(result)
             base_score = torch.tensor(sum(outputs_tox) / len(outputs_tox))
         else:
@@ -235,6 +235,7 @@ def calculate_hidden_flow(
         noise=noise,
         use_tox=use_tox,
         prompt=prompt,
+        trace_layers=trace_layers,
     ).item()
     if not only_scores:
         if not kind:
@@ -246,7 +247,7 @@ def calculate_hidden_flow(
                 answer_t,
                 noise=noise,
                 use_tox=use_tox,
-                prompt=prompt,
+                traced_layers=traced_layers,
             )
         else:
             differences = trace_important_window(
@@ -261,11 +262,12 @@ def calculate_hidden_flow(
                 use_tox=use_tox,
                 prompt=prompt,
                 store_hidden=store_hidden,
+                trace_layers=trace_layers,
             )
         differences = differences.detach().cpu()
     else:
         differences = None
-    
+
     return dict(
         scores=differences,
         low_score=low_score,
@@ -289,6 +291,7 @@ def trace_important_states(
     noise=0.1,
     use_tox: bool = False,
     prompt=None,
+    trace_layers: list = None,
 ):
     ntoks = inp["input_ids"].shape[1]
     table = []
@@ -304,6 +307,7 @@ def trace_important_states(
                 noise=noise,
                 use_tox=use_tox,
                 prompt=prompt,
+                trace_layers=trace_layers,
             )
             row.append(r)
         table.append(torch.stack(row))
@@ -322,6 +326,7 @@ def trace_important_window(
     use_tox: bool = False,
     prompt=None,
     store_hidden: dict = None,
+    trace_layers: list = None,
 ):
     ntoks = inp["input_ids"].shape[1]
     table = []
@@ -344,6 +349,7 @@ def trace_important_window(
                 use_tox=use_tox,
                 prompt=prompt,
                 store_hidden=store_hidden,
+                trace_layers=trace_layers,
             )
             row.append(r)
         table.append(torch.stack(row))
@@ -373,16 +379,20 @@ class ModelAndTokenizer:
                 tokenizer = AutoTokenizer.from_pretrained(model_name)
             else:
                 tokenizer = AutoTokenizer.from_pretrained(tok_local_path)
-            
+
         if model is None:
             assert model_name is not None
             if mod_local_path is None:
                 model = AutoModelForCausalLM.from_pretrained(
-                    model_name, low_cpu_mem_usage=low_cpu_mem_usage, torch_dtype=torch_dtype
+                    model_name,
+                    low_cpu_mem_usage=low_cpu_mem_usage,
+                    torch_dtype=torch_dtype,
                 )
             else:
                 model = AutoModelForCausalLM.from_pretrained(
-                    mod_local_path, low_cpu_mem_usage=low_cpu_mem_usage, torch_dtype=torch_dtype
+                    mod_local_path,
+                    low_cpu_mem_usage=low_cpu_mem_usage,
+                    torch_dtype=torch_dtype,
                 )
             nethook.set_requires_grad(False, model)
             if torch.cuda.is_available():
@@ -486,10 +496,12 @@ def plot_trace_heatmap(
         else:
             h = ax.pcolor(
                 differences,
-                cmap=
-                {None: "Purples", "None": "Purples", "mlp": "Greens", "attn": "Reds"}[
-                    kind
-                ],
+                cmap={
+                    None: "Purples",
+                    "None": "Purples",
+                    "mlp": "Greens",
+                    "attn": "Reds",
+                }[kind],
                 vmin=low_score,
             )
         ax.invert_yaxis()
@@ -516,7 +528,7 @@ def plot_trace_heatmap(
             # The following should be cb.ax.set_xlabel, but this is broken in matplotlib 3.5.1.
             cb.ax.set_title(f"p({str(answer).strip()})", y=-0.16, fontsize=10)
         if use_tox:
-            cb.ax.set_title(f"p(tox)", y=-0.16, fontsize=10)
+            cb.ax.set_title(f"p_tox", y=-0.16, fontsize=10)
         plt.annotate(
             f'p_clean: {result["high_score"].item():0.3f}, p_corr: {result["low_score"]:0.3f}',
             xy=(0.03, -0.20),
@@ -526,7 +538,7 @@ def plot_trace_heatmap(
             bbox=dict(boxstyle="round", fc="1"),
         )
         if savepdf:
-            os.makedirs(os.path.dirname(savepdf), exist_ok=True)
+            #             os.makedirs(os.path.dirname(savepdf), exist_ok=True)
             plt.savefig(savepdf, bbox_inches="tight", dpi=300)
             plt.close()
         else:
@@ -602,9 +614,10 @@ def gen_from_input(mt, inp, gen_length: int = 35):
 
     # int = model.generate(inp["input_ids"], max_length=gen_length)
     # print(inp)
-    int = mt.model.generate(**inp, max_length=gen_length, pad_token_id=mt.tokenizer.eos_token_id)
+    int = mt.model.generate(
+        **inp, max_length=gen_length, pad_token_id=mt.tokenizer.eos_token_id
+    )
     # int = model.generate(**inp)
-
 
     # out = int["logits"]
     # probs = torch.softmax(out[:, -1], dim=1)
